@@ -15,6 +15,7 @@ use PHPUnit\Framework\TestCase;
 use Symfony\Bundle\WebProfilerBundle\Csp\ContentSecurityPolicyHandler;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\VarDumper\VarDumper;
 
 class ContentSecurityPolicyHandlerTest extends TestCase
 {
@@ -35,6 +36,25 @@ class ContentSecurityPolicyHandlerTest extends TestCase
     {
         $cspHandler = new ContentSecurityPolicyHandler($this->mockNonceGenerator($nonce));
 
+        $this->assertSame($expectedNonce, $cspHandler->updateResponseHeaders($request, $response));
+
+        $this->assertFalse($response->headers->has('X-SymfonyProfiler-Script-Nonce'));
+        $this->assertFalse($response->headers->has('X-SymfonyProfiler-Style-Nonce'));
+
+        foreach ($expectedCsp as $header => $value) {
+            $this->assertSame($value, $response->headers->get($header));
+        }
+    }
+
+    /**
+     * @dataProvider provideRequestAndResponsesForOnKernelResponseDumperUsed
+     */
+    public function testOnKernelResponseDumperUsed($nonce, $expectedNonce, Request $request, Response $response, array $expectedCsp)
+    {
+
+        $cspHandler = new ContentSecurityPolicyHandler($this->mockNonceGenerator($nonce));
+
+        VarDumper::$dumped = true;
         $this->assertSame($expectedNonce, $cspHandler->updateResponseHeaders($request, $response));
 
         $this->assertFalse($response->headers->has('X-SymfonyProfiler-Script-Nonce'));
@@ -174,6 +194,35 @@ class ContentSecurityPolicyHandlerTest extends TestCase
                 $this->createRequest(),
                 $this->createResponse(array('Content-Security-Policy' => 'script-src \'self\'; style-src \'self\'', 'X-Content-Security-Policy' => 'script-src \'self\' \'unsafe-inline\'; style-src \'self\'')),
                 array('Content-Security-Policy' => 'script-src \'self\' \'unsafe-inline\' \'nonce-'.$nonce.'\'; style-src \'self\' \'unsafe-inline\' \'nonce-'.$nonce.'\'', 'X-Content-Security-Policy' => 'script-src \'self\' \'unsafe-inline\'; style-src \'self\' \'unsafe-inline\' \'nonce-'.$nonce.'\''),
+            ),
+        );
+    }
+
+    public function provideRequestAndResponsesForOnKernelResponseDumperUsed()
+    {
+        $nonce = bin2hex(random_bytes(16));
+
+        return array(
+            array(
+                $nonce,
+                array('csp_script_nonce' => $nonce, 'csp_style_nonce' => $nonce),
+                $this->createRequest(),
+                $this->createResponse(),
+                array('Content-Security-Policy' => null, 'Content-Security-Policy-Report-Only' => null, 'X-Content-Security-Policy' => null),
+            ),
+            array(
+                $nonce,
+                array('csp_script_nonce' => $nonce, 'csp_style_nonce' => $nonce),
+                $this->createRequest(),
+                $this->createResponse(array('Content-Security-Policy' => 'script-src \'self\' \'unsafe-inline\'')),
+                array('Content-Security-Policy' => 'script-src \'self\' \'unsafe-inline\' \'unsafe-eval\'', 'X-Content-Security-Policy' => null),
+            ),
+            array(
+                $nonce,
+                array('csp_script_nonce' => $nonce, 'csp_style_nonce' => $nonce),
+                $this->createRequest(),
+                $this->createResponse(array('Content-Security-Policy' => 'default-src \'self\' \'unsafe-inline\'')),
+                array('Content-Security-Policy' => 'default-src \'self\' \'unsafe-inline\'; script-src \'unsafe-eval\'', 'X-Content-Security-Policy' => null),
             ),
         );
     }

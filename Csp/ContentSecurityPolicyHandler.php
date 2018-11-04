@@ -13,6 +13,7 @@ namespace Symfony\Bundle\WebProfilerBundle\Csp;
 
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\VarDumper\VarDumper;
 
 /**
  * Handles Content-Security-Policy HTTP header for the WebProfiler Bundle.
@@ -128,6 +129,7 @@ class ContentSecurityPolicyHandler
         $headers = $this->getCspHeaders($response);
 
         foreach ($headers as $header => $directives) {
+            // unsafe-inline is needed for inline JS and CSS that the profiler uses
             foreach (array('script-src' => 'csp_script_nonce', 'style-src' => 'csp_style_nonce') as $type => $tokenName) {
                 if ($this->authorizesInline($directives, $type)) {
                     continue;
@@ -146,6 +148,13 @@ class ContentSecurityPolicyHandler
                 }
                 $headers[$header][$type][] = sprintf('\'nonce-%s\'', $nonces[$tokenName]);
             }
+
+            // unsafe-eval is only needed if the dumper was used
+            if (VarDumper::$dumped && !$this->authorizesEval($directives, 'script-src')) {
+                $ruleIsSet = true;
+                $headers[$header]['script-src'][] = '\'unsafe-eval\'';
+            }
+
         }
 
         if (!$ruleIsSet) {
@@ -225,6 +234,27 @@ class ContentSecurityPolicyHandler
         }
 
         return \in_array('\'unsafe-inline\'', $directives, true) && !$this->hasHashOrNonce($directives);
+    }
+
+    /**
+     * Detects if the 'unsafe-eval' is prevented for a directive within the directive set.
+     *
+     * @param array  $directivesSet The directive set
+     * @param string $type          The name of the directive to check
+     *
+     * @return bool
+     */
+    private function authorizesEval(array $directivesSet, $type)
+    {
+        if (isset($directivesSet[$type])) {
+            $directives = $directivesSet[$type];
+        } elseif (isset($directivesSet['default-src'])) {
+            $directives = $directivesSet['default-src'];
+        } else {
+            return false;
+        }
+
+        return \in_array('\'unsafe-eval\'', $directives, true);
     }
 
     private function hasHashOrNonce(array $directives)
